@@ -1,0 +1,6 @@
+[package]
+name = "atomic_ref"
+version = "0.1.0"
+authors = ["Michael Layzell <michael@thelayzells.com>"]
+
+[dependencies]
