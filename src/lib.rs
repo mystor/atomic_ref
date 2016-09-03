@@ -137,7 +137,8 @@ macro_rules! static_atomic_ref {
             type Target = $crate::AtomicRef<'static, $T>;
             #[allow(unsafe_code)]
             fn deref<'a>(&'a self) -> &'a $crate::AtomicRef<'static, $T> {
-                unsafe { ::std::mem::transmute(&self._ref) }
+                static STORAGE: $crate::AtomicRef<'static, u8> = $crate::ATOMIC_U8_REF_INIT;
+                unsafe { ::std::mem::transmute(&STORAGE) }
             }
         }
         static_atomic_ref!($($t)*);
@@ -147,18 +148,18 @@ macro_rules! static_atomic_ref {
         #[allow(non_camel_case_types)]
         #[allow(dead_code)]
         $(#[$attr])*
-        pub struct $N { _ref: $crate::AtomicRef<'static, u8> }
+        pub struct $N { _private: () }
         #[doc(hidden)]
-        pub static $N: $N = $N { _ref: $crate::ATOMIC_U8_REF_INIT };
+        pub static $N: $N = $N { _private: () };
     };
     (@MAKE TY, PRIV, $(#[$attr:meta])*, $N:ident) => {
         #[allow(missing_copy_implementations)]
         #[allow(non_camel_case_types)]
         #[allow(dead_code)]
         $(#[$attr])*
-        struct $N { _ref: $crate::AtomicRef<'static, u8> }
+        struct $N { _private: () }
         #[doc(hidden)]
-        static $N: $N = $N { _ref: $crate::ATOMIC_U8_REF_INIT };
+        static $N: $N = $N { _private: () };
     };
     () => ();
 }
