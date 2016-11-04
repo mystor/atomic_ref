@@ -72,6 +72,7 @@
 //! }
 //! ```
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
 use std::marker::PhantomData;
 use std::fmt;
@@ -81,7 +82,7 @@ use std::default::Default;
 #[repr(C)]
 pub struct AtomicRef<'a, T: 'a> {
     data: AtomicUsize,
-    _marker: PhantomData<&'a T>,
+    _marker: PhantomData<Mutex<&'a T>>,
 }
 
 /// You will probably never need to use this type. It exists mostly for internal

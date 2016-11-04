@@ -1,6 +1,6 @@
 [package]
 name = "atomic_ref"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Michael Layzell <michael@thelayzells.com>"]
 
 description = "Atomic &'a T types with support for static allocation"
