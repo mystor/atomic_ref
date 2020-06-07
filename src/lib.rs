@@ -78,7 +78,6 @@
 //!    into `const fn`, making it callable in constant contexts.
 //!
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_fn))]
 #![cfg_attr(feature = "nightly", feature(const_if_match))]
 
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -92,8 +91,12 @@ use core::default::Default;
 pub struct AtomicRef<'a, T: 'a> {
     data: AtomicPtr<T>,
     // Make `AtomicRef` invariant over `'a` and `T`
-    _marker: PhantomData<&'a mut &'a mut T>,
+    _marker: PhantomData<Invariant<'a, T>>,
 }
+
+// Work-around for the construction of `PhantomData<&mut _>` requiring
+// `#![feature(const_fn)]`
+struct Invariant<'a, T: 'a>(&'a mut &'a mut T);
 
 /// You will probably never need to use this type. It exists mostly for internal
 /// use in the `static_atomic_ref!` macro.
