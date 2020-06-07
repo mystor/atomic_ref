@@ -73,15 +73,16 @@
 //! ```
 #![no_std]
 
-use core::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
+use core::sync::atomic::{AtomicPtr, Ordering};
 use core::marker::PhantomData;
 use core::fmt;
+use core::ptr::null_mut;
 use core::default::Default;
 
 /// A mutable Option<&'a, T> type which can be safely shared between threads.
 #[repr(C)]
 pub struct AtomicRef<'a, T: 'a> {
-    data: AtomicUsize,
+    data: AtomicPtr<T>,
     // Make `AtomicRef` invariant over `'a` and `T`
     _marker: PhantomData<&'a mut &'a mut T>,
 }
@@ -101,7 +102,7 @@ pub struct AtomicRef<'a, T: 'a> {
 /// Please use `static_atomic_ref!` instead of this constant if you need to
 /// implement a static atomic reference variable.
 pub const ATOMIC_U8_REF_INIT: AtomicRef<'static, u8> = AtomicRef {
-    data: ATOMIC_USIZE_INIT,
+    data: AtomicPtr::new(null_mut()),
     _marker: PhantomData,
 };
 
@@ -171,19 +172,19 @@ macro_rules! static_atomic_ref {
     () => ();
 }
 
-/// An internal helper function for converting `Option<&'a T>` values to usize
-/// for storing in the `AtomicUsize`.
-fn from_opt<'a, T>(p: Option<&'a T>) -> usize {
+/// An internal helper function for converting `Option<&'a T>` values to
+/// `*mut T` for storing in the `AtomicUsize`.
+fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
     match p {
-        Some(p) => p as *const T as usize,
-        None => 0,
+        Some(p) => p as *const T as *mut T,
+        None => null_mut(),
     }
 }
 
-/// An internal helper function for converting `usize` values stored in the
+/// An internal helper function for converting `*mut T` values stored in the
 /// `AtomicUsize` back into `Option<&'a T>` values.
-unsafe fn to_opt<'a, T>(p: usize) -> Option<&'a T> {
-    (p as *const T).as_ref()
+unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
+    p.as_ref()
 }
 
 impl<'a, T> AtomicRef<'a, T> {
@@ -199,7 +200,7 @@ impl<'a, T> AtomicRef<'a, T> {
     /// ```
     pub fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
         AtomicRef {
-            data: AtomicUsize::new(from_opt(p)),
+            data: AtomicPtr::new(from_opt(p)),
             _marker: PhantomData,
         }
     }
