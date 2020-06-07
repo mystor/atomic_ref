@@ -10,4 +10,8 @@ readme = "README.md"
 license = "MIT"
 keywords = ["atomic", "reference", "static"]
 
+[features]
+default = []
+nightly = []
+
 [dependencies]
