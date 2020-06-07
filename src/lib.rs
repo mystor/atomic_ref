@@ -71,11 +71,12 @@
 //!     assert!(res);
 //! }
 //! ```
+#![no_std]
 
-use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
-use std::marker::PhantomData;
-use std::fmt;
-use std::default::Default;
+use core::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
+use core::marker::PhantomData;
+use core::fmt;
+use core::default::Default;
 
 /// A mutable Option<&'a, T> type which can be safely shared between threads.
 #[repr(C)]
@@ -103,6 +104,11 @@ pub const ATOMIC_U8_REF_INIT: AtomicRef<'static, u8> = AtomicRef {
     data: ATOMIC_USIZE_INIT,
     _marker: PhantomData,
 };
+
+/// Re-export `core` for `static_atomic_ref!` (which may be used in a
+/// non-`no_std` crate, where `core` is unavailable).
+#[doc(hidden)]
+pub use core::{mem as core_mem, ops as core_ops};
 
 /// A macro to define a statically allocated `AtomicRef<'static, T>` which is
 /// initialized to `None`.
@@ -134,12 +140,12 @@ macro_rules! static_atomic_ref {
     };
     (@$VIS:ident, $(#[$attr:meta])* static $N:ident : $T:ty; $($t:tt)*) => {
         static_atomic_ref!(@MAKE TY, $VIS, $(#[$attr])*, $N);
-        impl ::std::ops::Deref for $N {
+        impl $crate::core_ops::Deref for $N {
             type Target = $crate::AtomicRef<'static, $T>;
             #[allow(unsafe_code)]
             fn deref<'a>(&'a self) -> &'a $crate::AtomicRef<'static, $T> {
                 static STORAGE: $crate::AtomicRef<'static, u8> = $crate::ATOMIC_U8_REF_INIT;
-                unsafe { ::std::mem::transmute(&STORAGE) }
+                unsafe { $crate::core_mem::transmute(&STORAGE) }
             }
         }
         static_atomic_ref!($($t)*);
@@ -403,7 +409,7 @@ impl<'a, T> Default for AtomicRef<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
+    use core::sync::atomic::Ordering;
 
     static_atomic_ref! {
         static FOO: AtomicRef<i32>;
