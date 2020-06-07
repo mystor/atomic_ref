@@ -72,6 +72,8 @@
 //! }
 //! ```
 #![no_std]
+#![feature(const_fn)]
+#![feature(const_if_match)]
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::marker::PhantomData;
@@ -174,7 +176,7 @@ macro_rules! static_atomic_ref {
 
 /// An internal helper function for converting `Option<&'a T>` values to
 /// `*mut T` for storing in the `AtomicUsize`.
-fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
+const fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
     match p {
         Some(p) => p as *const T as *mut T,
         None => null_mut(),
@@ -198,7 +200,7 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static VALUE: i32 = 10;
     /// let atomic_ref = AtomicRef::new(Some(&VALUE));
     /// ```
-    pub fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
+    pub const fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
         AtomicRef {
             data: AtomicPtr::new(from_opt(p)),
             _marker: PhantomData,
