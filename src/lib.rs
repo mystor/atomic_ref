@@ -139,34 +139,16 @@ macro_rules! static_atomic_ref {
         static_atomic_ref!(@PUB, $(#[$attr])* static $N : $T; $($t)*);
     };
     (@$VIS:ident, $(#[$attr:meta])* static $N:ident : $T:ty; $($t:tt)*) => {
-        static_atomic_ref!(@MAKE TY, $VIS, $(#[$attr])*, $N);
-        impl $crate::core_ops::Deref for $N {
-            type Target = $crate::AtomicRef<'static, $T>;
-            #[allow(unsafe_code)]
-            fn deref<'a>(&'a self) -> &'a $crate::AtomicRef<'static, $T> {
-                static STORAGE: $crate::AtomicRef<'static, u8> = $crate::ATOMIC_U8_REF_INIT;
-                unsafe { $crate::core_mem::transmute(&STORAGE) }
-            }
-        }
+        static_atomic_ref!(@MAKE TY, $VIS, $(#[$attr])*, $N, $T);
         static_atomic_ref!($($t)*);
     };
-    (@MAKE TY, PUB, $(#[$attr:meta])*, $N:ident) => {
-        #[allow(missing_copy_implementations)]
-        #[allow(non_camel_case_types)]
-        #[allow(dead_code)]
+    (@MAKE TY, PUB, $(#[$attr:meta])*, $N:ident, $T:ty) => {
         $(#[$attr])*
-        pub struct $N { _private: () }
-        #[doc(hidden)]
-        pub static $N: $N = $N { _private: () };
+        pub static $N: $crate::AtomicRef<'static, $T> = $crate::AtomicRef::static_none();
     };
-    (@MAKE TY, PRIV, $(#[$attr:meta])*, $N:ident) => {
-        #[allow(missing_copy_implementations)]
-        #[allow(non_camel_case_types)]
-        #[allow(dead_code)]
+    (@MAKE TY, PRIV, $(#[$attr:meta])*, $N:ident, $T:ty) => {
         $(#[$attr])*
-        struct $N { _private: () }
-        #[doc(hidden)]
-        static $N: $N = $N { _private: () };
+        static $N: $crate::AtomicRef<'static, $T> = $crate::AtomicRef::static_none();
     };
     () => ();
 }
@@ -184,6 +166,32 @@ fn from_opt<'a, T>(p: Option<&'a T>) -> usize {
 /// `AtomicUsize` back into `Option<&'a T>` values.
 unsafe fn to_opt<'a, T>(p: usize) -> Option<&'a T> {
     (p as *const T).as_ref()
+}
+
+impl<T: 'static> AtomicRef<'static, T> {
+    // Putting this inside `static_none` hits a "no mutable references in const
+    // fn" limitation, because of the `PhantomData`. Other methods of enforcing
+    // invariance hit the same sort of problem (`fn` isn't allowed either).
+    const NONE: Self = Self {
+        data: AtomicUsize::new(0),
+        _marker: PhantomData,
+    };
+    /// Returns a `AtomicRef<'static, T>` with a value of `None`.
+    ///
+    /// This is useful as it is implemented as a `const fn`, and thus can
+    /// initialize an `AtomicRef` used as a `static`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use atomic_ref::AtomicRef;
+    ///
+    /// pub static SOME_REFERENCE: AtomicRef<'static, u64> = AtomicRef::static_none();
+    /// ```
+    #[inline]
+    pub const fn static_none() -> Self {
+        Self::NONE
+    }
 }
 
 impl<'a, T> AtomicRef<'a, T> {
