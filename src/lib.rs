@@ -73,7 +73,8 @@
 //! ```
 #![no_std]
 
-use core::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
+use core::sync::atomic::{AtomicPtr, Ordering};
+use core::ptr::null_mut;
 use core::marker::PhantomData;
 use core::fmt;
 use core::default::Default;
@@ -81,7 +82,7 @@ use core::default::Default;
 /// A mutable Option<&'a, T> type which can be safely shared between threads.
 #[repr(C)]
 pub struct AtomicRef<'a, T: 'a> {
-    data: AtomicUsize,
+    data: AtomicPtr<T>,
     // Make `AtomicRef` invariant over `'a` and `T`
     _marker: PhantomData<&'a mut &'a mut T>,
 }
@@ -101,7 +102,7 @@ pub struct AtomicRef<'a, T: 'a> {
 /// Please use `static_atomic_ref!` instead of this constant if you need to
 /// implement a static atomic reference variable.
 pub const ATOMIC_U8_REF_INIT: AtomicRef<'static, u8> = AtomicRef {
-    data: ATOMIC_USIZE_INIT,
+    data: AtomicPtr::new(null_mut()),
     _marker: PhantomData,
 };
 
@@ -153,18 +154,18 @@ macro_rules! static_atomic_ref {
     () => ();
 }
 
-/// An internal helper function for converting `Option<&'a T>` values to usize
-/// for storing in the `AtomicUsize`.
-fn from_opt<'a, T>(p: Option<&'a T>) -> usize {
+/// An internal helper function for converting `Option<&'a T>` values to `*mut T`
+/// for storing in the `AtomicPtr`.
+fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
     match p {
-        Some(p) => p as *const T as usize,
-        None => 0,
+        Some(p) => p as *const T as *mut T,
+        None => null_mut(),
     }
 }
 
-/// An internal helper function for converting `usize` values stored in the
-/// `AtomicUsize` back into `Option<&'a T>` values.
-unsafe fn to_opt<'a, T>(p: usize) -> Option<&'a T> {
+/// An internal helper function for converting `*mut T` values stored in the
+/// `AtomicPtr` back into `Option<&'a T>` values.
+unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
     (p as *const T).as_ref()
 }
 
@@ -173,7 +174,7 @@ impl<T: 'static> AtomicRef<'static, T> {
     // fn" limitation, because of the `PhantomData`. Other methods of enforcing
     // invariance hit the same sort of problem (`fn` isn't allowed either).
     const NONE: Self = Self {
-        data: AtomicUsize::new(0),
+        data: AtomicPtr::new(null_mut()),
         _marker: PhantomData,
     };
     /// Returns a `AtomicRef<'static, T>` with a value of `None`.
@@ -192,6 +193,31 @@ impl<T: 'static> AtomicRef<'static, T> {
     pub const fn static_none() -> Self {
         Self::NONE
     }
+
+    /// Returns a `AtomicRef<'static, T>` with a value of `Some(arg)`.
+    ///
+    /// This is useful as it is implemented as a `const fn`, and thus can
+    /// initialize an `AtomicRef` used as a `static`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use atomic_ref::AtomicRef;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// static INITIAL: u64 = 123;
+    ///
+    /// pub static SOME_REFERENCE: AtomicRef<'static, u64> = AtomicRef::static_some(&INITIAL);
+    ///
+    /// assert_eq!(Some(&123), SOME_REFERENCE.load(Ordering::SeqCst));
+    /// ```
+    #[inline]
+    pub const fn static_some(init: &'static T) -> Self {
+        Self {
+            data: AtomicPtr::new(init as *const T as *mut T),
+            ..Self::NONE
+        }
+    }
 }
 
 impl<'a, T> AtomicRef<'a, T> {
@@ -207,7 +233,7 @@ impl<'a, T> AtomicRef<'a, T> {
     /// ```
     pub fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
         AtomicRef {
-            data: AtomicUsize::new(from_opt(p)),
+            data: AtomicPtr::new(from_opt(p)),
             _marker: PhantomData,
         }
     }
@@ -431,5 +457,15 @@ mod tests {
         FOO.store(Some(&A), Ordering::SeqCst);
         assert!(FOO.load(Ordering::SeqCst) == Some(&A));
         assert!(FOO.load(Ordering::SeqCst).unwrap() as *const _ == &A as *const _);
+    }
+
+    static BAR: super::AtomicRef<'static, i32> = super::AtomicRef::static_some(&A);
+
+    #[test]
+    fn static_some() {
+        assert_eq!(BAR.load(Ordering::SeqCst), Some(&10));
+        assert_eq!(BAR.load(Ordering::SeqCst).unwrap() as *const _, &A as *const _);
+        BAR.store(None, Ordering::SeqCst);
+        assert_eq!(BAR.load(Ordering::SeqCst), None);
     }
 }
