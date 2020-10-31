@@ -35,7 +35,7 @@
 //!     fn log(&self, msg: &str) {}
 //! }
 //! struct LoggerInfo {
-//!     logger: &'static (Logger + Sync)
+//!     logger: &'static (dyn Logger + Sync)
 //! }
 //!
 //! // The methods for working with our currently defined static logger
