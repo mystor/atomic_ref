@@ -1,7 +1,7 @@
 [package]
 name = "atomic_ref"
 version = "0.1.2"
-authors = ["Michael Layzell <michael@thelayzells.com>"]
+authors = ["Nika Layzell <nika@thelayzells.com>"]
 
 description = "Atomic &'a T types with support for static allocation"
 repository = "https://github.com/mystor/atomic_ref"
