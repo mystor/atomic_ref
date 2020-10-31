@@ -71,14 +71,8 @@
 //!     assert!(res);
 //! }
 //! ```
-//!
-//! # Cargo Features
-//!
-//!  - `nightly` enables the use of unstable features. Turns [`AtomicRef::new`]
-//!    into `const fn`, making it callable in constant contexts.
-//!
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(const_if_match))]
+
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::marker::PhantomData;
@@ -183,29 +177,12 @@ macro_rules! static_atomic_ref {
     () => ();
 }
 
-macro_rules! const_fn_if_nightly {
-    (
-        $( #[$meta:meta] )*
-        $vis:vis fn $($rest:tt)*
-    ) => {
-        $( #[$meta] )*
-        #[cfg(feature = "nightly")]
-        $vis const fn $($rest)*
-
-        $( #[$meta] )*
-        #[cfg(not(feature = "nightly"))]
-        $vis fn $($rest)*
-    };
-}
-
-const_fn_if_nightly! {
-    /// An internal helper function for converting `Option<&'a T>` values to
-    /// `*mut T` for storing in the `AtomicUsize`.
-    fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
-        match p {
-            Some(p) => p as *const T as *mut T,
-            None => null_mut(),
-        }
+/// An internal helper function for converting `Option<&'a T>` values to
+/// `*mut T` for storing in the `AtomicUsize`.
+const fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
+    match p {
+        Some(p) => p as *const T as *mut T,
+        None => null_mut(),
     }
 }
 
@@ -216,22 +193,20 @@ unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
 }
 
 impl<'a, T> AtomicRef<'a, T> {
-    const_fn_if_nightly! {
-        /// Creates a new `AtomicRef`.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// use atomic_ref::AtomicRef;
-        ///
-        /// static VALUE: i32 = 10;
-        /// let atomic_ref = AtomicRef::new(Some(&VALUE));
-        /// ```
-        pub fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
-            AtomicRef {
-                data: AtomicPtr::new(from_opt(p)),
-                _marker: PhantomData,
-            }
+    /// Creates a new `AtomicRef`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use atomic_ref::AtomicRef;
+    ///
+    /// static VALUE: i32 = 10;
+    /// let atomic_ref = AtomicRef::new(Some(&VALUE));
+    /// ```
+    pub const fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
+        AtomicRef {
+            data: AtomicPtr::new(from_opt(p)),
+            _marker: PhantomData,
         }
     }
 
