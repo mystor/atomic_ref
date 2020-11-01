@@ -8,11 +8,6 @@
 //! correctly, synchronize updates between threads. This type is a form of
 //! interior mutability, like `Cell<T>`, `RefCell<T>`, or `Mutex<T>`.
 //!
-//! To store an atomic reference in a static variable, a the macro
-//! `static_atomic_ref!` must be used. A static initializer like
-//! `ATOMIC_REF_INIT` is not possible due to the need to be generic over any
-//! reference target type.
-//!
 //! This type in static position is often used for lazy global initialization.
 //!
 //! `AtomicRef` may only contain `Sized` types, as unsized types have wide
@@ -24,8 +19,6 @@
 //! Static logger state
 //!
 //! ```
-//! #[macro_use]
-//! extern crate atomic_ref;
 //! use atomic_ref::AtomicRef;
 //! use std::sync::atomic::Ordering;
 //! use std::io::{stdout, Write};
@@ -74,10 +67,11 @@
 use core::default::Default;
 use core::fmt;
 use core::marker::PhantomData;
-use core::ptr::null_mut;
+use core::mem;
+use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-/// A mutable Option<&'a, T> type which can be safely shared between threads.
+/// A mutable `Option<&'a T>` type which can be safely shared between threads.
 #[repr(C)]
 pub struct AtomicRef<'a, T: 'a> {
     data: AtomicPtr<T>,
@@ -91,15 +85,17 @@ struct Invariant<'a, T: 'a>(&'a mut &'a mut T);
 
 /// An internal helper function for converting `Option<&'a T>` values to
 /// `*mut T` for storing in the `AtomicUsize`.
+#[inline(always)]
 const fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
     match p {
         Some(p) => p as *const T as *mut T,
-        None => null_mut(),
+        None => ptr::null_mut(),
     }
 }
 
 /// An internal helper function for converting `*mut T` values stored in the
 /// `AtomicUsize` back into `Option<&'a T>` values.
+#[inline(always)]
 unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
     p.as_ref()
 }
@@ -120,6 +116,47 @@ impl<'a, T> AtomicRef<'a, T> {
             data: AtomicPtr::new(from_opt(p)),
             _marker: PhantomData,
         }
+    }
+
+    /// Returns a mutable reference to the underlying `Option<&'a T>`.
+    ///
+    /// This is safe because the mutable reference guarantees that no other
+    /// threads are concurrently accessing the atomic data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::atomic::Ordering;
+    /// use atomic_ref::AtomicRef;
+    ///
+    /// let value: i32 = 10;
+    /// let value2: i32 = 20;
+    ///
+    /// let mut some_ref = AtomicRef::new(Some(&value));
+    /// assert_eq!(*some_ref.get_mut(), Some(&value));
+    /// *some_ref.get_mut() = Some(&value2);
+    /// assert_eq!(some_ref.load(Ordering::SeqCst), Some(&value2));
+    /// ```
+    pub fn get_mut(&mut self) -> &mut Option<&'a T> {
+        debug_assert_eq!(mem::size_of::<Option<&'a T>>(), mem::size_of::<*mut T>());
+        unsafe { mem::transmute::<&mut *mut T, &mut Option<&'a T>>(self.data.get_mut()) }
+    }
+
+    /// Consumes the atomic and returns the contained value.
+    ///
+    /// This is safe because passing `self` by value guarantees that no other
+    /// threads are concurrently accessing the atomic data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use atomic_ref::AtomicRef;
+    ///
+    /// let some_ref = AtomicRef::new(Some(&5));
+    /// assert_eq!(some_ref.into_inner(), Some(&5));
+    /// ```
+    pub fn into_inner(self) -> Option<&'a T> {
+        unsafe { to_opt(self.data.into_inner()) }
     }
 
     /// Loads the value stored in the `AtomicRef`.
@@ -331,15 +368,19 @@ impl<'a, T> AtomicRef<'a, T> {
 
 impl<'a, T: fmt::Debug> fmt::Debug for AtomicRef<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("AtomicRef")
-            .field(&self.load(Ordering::SeqCst))
-            .finish()
+        fmt::Debug::fmt(&self.load(Ordering::SeqCst), f)
     }
 }
 
 impl<'a, T> Default for AtomicRef<'a, T> {
     fn default() -> AtomicRef<'a, T> {
         AtomicRef::new(None)
+    }
+}
+
+impl<'a, T> From<Option<&'a T>> for AtomicRef<'a, T> {
+    fn from(other: Option<&'a T>) -> AtomicRef<'a, T> {
+        AtomicRef::new(other)
     }
 }
 
