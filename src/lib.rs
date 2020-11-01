@@ -89,11 +89,6 @@ pub struct AtomicRef<'a, T: 'a> {
 // `#![feature(const_fn)]`
 struct Invariant<'a, T: 'a>(&'a mut &'a mut T);
 
-/// Re-export `core` for `static_atomic_ref!` (which may be used in a
-/// non-`no_std` crate, where `core` is unavailable).
-#[doc(hidden)]
-pub use core::{mem as core_mem, ops as core_ops};
-
 /// An internal helper function for converting `Option<&'a T>` values to
 /// `*mut T` for storing in the `AtomicUsize`.
 const fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
