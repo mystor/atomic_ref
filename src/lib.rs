@@ -39,9 +39,7 @@
 //! }
 //!
 //! // The methods for working with our currently defined static logger
-//! static_atomic_ref! {
-//!     static LOGGER: AtomicRef<LoggerInfo>;
-//! }
+//! static LOGGER: AtomicRef<LoggerInfo> = AtomicRef::new(None);
 //! fn log(msg: &str) -> bool {
 //!     if let Some(info) = LOGGER.load(Ordering::SeqCst) {
 //!         info.logger.log(msg);
@@ -73,117 +71,37 @@
 //! ```
 #![no_std]
 
-use core::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
+use core::sync::atomic::{AtomicPtr, Ordering};
 use core::marker::PhantomData;
 use core::fmt;
+use core::ptr::null_mut;
 use core::default::Default;
 
 /// A mutable Option<&'a, T> type which can be safely shared between threads.
 #[repr(C)]
 pub struct AtomicRef<'a, T: 'a> {
-    data: AtomicUsize,
+    data: AtomicPtr<T>,
     // Make `AtomicRef` invariant over `'a` and `T`
-    _marker: PhantomData<&'a mut &'a mut T>,
+    _marker: PhantomData<Invariant<'a, T>>,
 }
 
-/// You will probably never need to use this type. It exists mostly for internal
-/// use in the `static_atomic_ref!` macro.
-///
-/// Unlike `AtomicUsize` and its ilk, we cannot have an `ATOMIC_REF_INIT` const
-/// which is initialized to `None`, as constants cannot be generic over a type
-/// parameter. This is the same reason why `AtomicPtr` does not have an
-/// `ATOMIC_PTR_INIT` const.
-///
-/// Instead, we have a single const for `&'static u8`, and take advantage of the
-/// fact that all AtomicRef types have identical layout to implement the
-/// `static_atomic_ref!` macro.
-///
-/// Please use `static_atomic_ref!` instead of this constant if you need to
-/// implement a static atomic reference variable.
-pub const ATOMIC_U8_REF_INIT: AtomicRef<'static, u8> = AtomicRef {
-    data: ATOMIC_USIZE_INIT,
-    _marker: PhantomData,
-};
+// Work-around for the construction of `PhantomData<&mut _>` requiring
+// `#![feature(const_fn)]`
+struct Invariant<'a, T: 'a>(&'a mut &'a mut T);
 
-/// Re-export `core` for `static_atomic_ref!` (which may be used in a
-/// non-`no_std` crate, where `core` is unavailable).
-#[doc(hidden)]
-pub use core::{mem as core_mem, ops as core_ops};
-
-/// A macro to define a statically allocated `AtomicRef<'static, T>` which is
-/// initialized to `None`.
-///
-/// # Examples
-///
-/// ```
-/// # #[macro_use]
-/// # extern crate atomic_ref;
-/// use std::sync::atomic::Ordering;
-///
-/// static_atomic_ref! {
-///     static SOME_REFERENCE: AtomicRef<i32>;
-///     pub static PUB_REFERENCE: AtomicRef<u64>;
-/// }
-///
-/// fn main() {
-///     let a: Option<&'static i32> = SOME_REFERENCE.load(Ordering::SeqCst);
-///     assert_eq!(a, None);
-/// }
-/// ```
-#[macro_export]
-macro_rules! static_atomic_ref {
-    ($(#[$attr:meta])* static $N:ident : AtomicRef<$T:ty>; $($t:tt)*) => {
-        static_atomic_ref!(@PRIV, $(#[$attr])* static $N : $T; $($t)*);
-    };
-    ($(#[$attr:meta])* pub static $N:ident : AtomicRef<$T:ty>; $($t:tt)*) => {
-        static_atomic_ref!(@PUB, $(#[$attr])* static $N : $T; $($t)*);
-    };
-    (@$VIS:ident, $(#[$attr:meta])* static $N:ident : $T:ty; $($t:tt)*) => {
-        static_atomic_ref!(@MAKE TY, $VIS, $(#[$attr])*, $N);
-        impl $crate::core_ops::Deref for $N {
-            type Target = $crate::AtomicRef<'static, $T>;
-            #[allow(unsafe_code)]
-            fn deref<'a>(&'a self) -> &'a $crate::AtomicRef<'static, $T> {
-                static STORAGE: $crate::AtomicRef<'static, u8> = $crate::ATOMIC_U8_REF_INIT;
-                unsafe { $crate::core_mem::transmute(&STORAGE) }
-            }
-        }
-        static_atomic_ref!($($t)*);
-    };
-    (@MAKE TY, PUB, $(#[$attr:meta])*, $N:ident) => {
-        #[allow(missing_copy_implementations)]
-        #[allow(non_camel_case_types)]
-        #[allow(dead_code)]
-        $(#[$attr])*
-        pub struct $N { _private: () }
-        #[doc(hidden)]
-        pub static $N: $N = $N { _private: () };
-    };
-    (@MAKE TY, PRIV, $(#[$attr:meta])*, $N:ident) => {
-        #[allow(missing_copy_implementations)]
-        #[allow(non_camel_case_types)]
-        #[allow(dead_code)]
-        $(#[$attr])*
-        struct $N { _private: () }
-        #[doc(hidden)]
-        static $N: $N = $N { _private: () };
-    };
-    () => ();
-}
-
-/// An internal helper function for converting `Option<&'a T>` values to usize
-/// for storing in the `AtomicUsize`.
-fn from_opt<'a, T>(p: Option<&'a T>) -> usize {
+/// An internal helper function for converting `Option<&'a T>` values to
+/// `*mut T` for storing in the `AtomicUsize`.
+const fn from_opt<'a, T>(p: Option<&'a T>) -> *mut T {
     match p {
-        Some(p) => p as *const T as usize,
-        None => 0,
+        Some(p) => p as *const T as *mut T,
+        None => null_mut(),
     }
 }
 
-/// An internal helper function for converting `usize` values stored in the
+/// An internal helper function for converting `*mut T` values stored in the
 /// `AtomicUsize` back into `Option<&'a T>` values.
-unsafe fn to_opt<'a, T>(p: usize) -> Option<&'a T> {
-    (p as *const T).as_ref()
+unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
+    p.as_ref()
 }
 
 impl<'a, T> AtomicRef<'a, T> {
@@ -197,9 +115,9 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static VALUE: i32 = 10;
     /// let atomic_ref = AtomicRef::new(Some(&VALUE));
     /// ```
-    pub fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
+    pub const fn new(p: Option<&'a T>) -> AtomicRef<'a, T> {
         AtomicRef {
-            data: AtomicUsize::new(from_opt(p)),
+            data: AtomicPtr::new(from_opt(p)),
             _marker: PhantomData,
         }
     }
@@ -410,10 +328,9 @@ impl<'a, T> Default for AtomicRef<'a, T> {
 #[cfg(test)]
 mod tests {
     use core::sync::atomic::Ordering;
+    use super::AtomicRef;
 
-    static_atomic_ref! {
-        static FOO: AtomicRef<i32>;
-    }
+    static FOO: AtomicRef<i32> = AtomicRef::new(None);
 
     static A: i32 = 10;
 
