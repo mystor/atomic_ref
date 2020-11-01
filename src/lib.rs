@@ -71,11 +71,11 @@
 //! ```
 #![no_std]
 
-use core::sync::atomic::{AtomicPtr, Ordering};
-use core::marker::PhantomData;
-use core::fmt;
-use core::ptr::null_mut;
 use core::default::Default;
+use core::fmt;
+use core::marker::PhantomData;
+use core::ptr::null_mut;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 /// A mutable Option<&'a, T> type which can be safely shared between threads.
 #[repr(C)]
@@ -142,9 +142,7 @@ impl<'a, T> AtomicRef<'a, T> {
     /// assert_eq!(some_ref.load(Ordering::Relaxed), Some(&10));
     /// ```
     pub fn load(&self, ordering: Ordering) -> Option<&'a T> {
-        unsafe {
-            to_opt(self.data.load(ordering))
-        }
+        unsafe { to_opt(self.data.load(ordering)) }
     }
 
     /// Stores a value into the `AtomicRef`.
@@ -187,9 +185,7 @@ impl<'a, T> AtomicRef<'a, T> {
     /// let value = some_ptr.swap(Some(&OTHER_VALUE), Ordering::Relaxed);
     /// ```
     pub fn swap(&self, p: Option<&'a T>, order: Ordering) -> Option<&'a T> {
-        unsafe {
-            to_opt(self.data.swap(from_opt(p), order))
-        }
+        unsafe { to_opt(self.data.swap(from_opt(p), order)) }
     }
 
     /// Stores a value into the `AtomicRef` if the current value is the "same" as
@@ -217,10 +213,17 @@ impl<'a, T> AtomicRef<'a, T> {
     /// let some_ptr = AtomicRef::new(Some(&VALUE));
     /// let value = some_ptr.compare_and_swap(Some(&OTHER_VALUE), None, Ordering::Relaxed);
     /// ```
-    pub fn compare_and_swap(&self, current: Option<&'a T>, new: Option<&'a T>, order: Ordering)
-                            -> Option<&'a T> {
+    pub fn compare_and_swap(
+        &self,
+        current: Option<&'a T>,
+        new: Option<&'a T>,
+        order: Ordering,
+    ) -> Option<&'a T> {
         unsafe {
-            to_opt(self.data.compare_and_swap(from_opt(current), from_opt(new), order))
+            to_opt(
+                self.data
+                    .compare_and_swap(from_opt(current), from_opt(new), order),
+            )
         }
     }
 
@@ -254,12 +257,18 @@ impl<'a, T> AtomicRef<'a, T> {
     /// let value = some_ptr.compare_exchange(Some(&OTHER_VALUE), None,
     ///                                       Ordering::SeqCst, Ordering::Relaxed);
     /// ```
-    pub fn compare_exchange(&self, current: Option<&'a T>, new: Option<&'a T>,
-                            success: Ordering, failure: Ordering)
-                            -> Result<Option<&'a T>, Option<&'a T>> {
+    pub fn compare_exchange(
+        &self,
+        current: Option<&'a T>,
+        new: Option<&'a T>,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Option<&'a T>, Option<&'a T>> {
         unsafe {
-            match self.data.compare_exchange(from_opt(current), from_opt(new),
-                                             success, failure) {
+            match self
+                .data
+                .compare_exchange(from_opt(current), from_opt(new), success, failure)
+            {
                 Ok(p) => Ok(to_opt(p)),
                 Err(p) => Err(to_opt(p)),
             }
@@ -299,12 +308,20 @@ impl<'a, T> AtomicRef<'a, T> {
     ///     }
     /// }
     /// ```
-    pub fn compare_exchange_weak(&self, current: Option<&'a T>, new: Option<&'a T>,
-                                 success: Ordering, failure: Ordering)
-                                 -> Result<Option<&'a T>, Option<&'a T>> {
+    pub fn compare_exchange_weak(
+        &self,
+        current: Option<&'a T>,
+        new: Option<&'a T>,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<Option<&'a T>, Option<&'a T>> {
         unsafe {
-            match self.data.compare_exchange_weak(from_opt(current), from_opt(new),
-                                                  success, failure) {
+            match self.data.compare_exchange_weak(
+                from_opt(current),
+                from_opt(new),
+                success,
+                failure,
+            ) {
                 Ok(p) => Ok(to_opt(p)),
                 Err(p) => Err(to_opt(p)),
             }
@@ -312,10 +329,11 @@ impl<'a, T> AtomicRef<'a, T> {
     }
 }
 
-
 impl<'a, T: fmt::Debug> fmt::Debug for AtomicRef<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("AtomicRef").field(&self.load(Ordering::SeqCst)).finish()
+        f.debug_tuple("AtomicRef")
+            .field(&self.load(Ordering::SeqCst))
+            .finish()
     }
 }
 
@@ -327,8 +345,8 @@ impl<'a, T> Default for AtomicRef<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use core::sync::atomic::Ordering;
     use super::AtomicRef;
+    use core::sync::atomic::Ordering;
 
     static FOO: AtomicRef<i32> = AtomicRef::new(None);
 
