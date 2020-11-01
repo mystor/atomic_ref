@@ -81,7 +81,7 @@ pub struct AtomicRef<'a, T: 'a> {
 
 // Work-around for the construction of `PhantomData<&mut _>` requiring
 // `#![feature(const_fn)]`
-struct Invariant<'a, T: 'a>(&'a mut &'a mut T);
+struct Invariant<'a, T: 'a>(&'a mut &'a T);
 
 /// An internal helper function for converting `Option<&'a T>` values to
 /// `*mut T` for storing in the `AtomicUsize`.
