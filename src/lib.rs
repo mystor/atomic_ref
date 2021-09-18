@@ -13,6 +13,13 @@
 //! `AtomicRef` may only contain `Sized` types, as unsized types have wide
 //! pointers which cannot be atomically written to or read from.
 //!
+//! # Ordering
+//!
+//! It is unsound to load or store an atomic reference with the `Relaxed` memory
+//! ordering, as these operations provide no ordering on writes to the data
+//! behind the reference. To avoid this issue, loads and stores with `Relaxed`
+//! memory ordering are actually performed with `Acquire`, `Release`, or
+//! `AcqRel` ordering, as appropriate.
 //!
 //! # Examples
 //!
@@ -100,6 +107,48 @@ unsafe fn to_opt<'a, T>(p: *mut T) -> Option<&'a T> {
     p.as_ref()
 }
 
+// As noted in #5, the use of `Relaxed` ordering with `atomic_ref` is unsound,
+// as `Relaxed` ordering performs no synchronization on the data behind the
+// reference. These methods restrict the load ordering to safe orderings by
+// requiring at least `Acquire` ordering for load operations, and `Release`
+// ordering for store operations.
+
+/// Restrict memory ordering for atomic load operations.
+#[inline]
+fn enforce_load_ordering(order: Ordering) -> Ordering {
+    match order {
+        Ordering::Relaxed | Ordering::Acquire => Ordering::Acquire,
+        Ordering::SeqCst => Ordering::SeqCst,
+        Ordering::Release => panic!("there is no such thing as a release load"),
+        Ordering::AcqRel => panic!("there is no such thing as an acquire/release load"),
+        _ => panic!("unsupported memory ordering: {:?}", order),
+    }
+}
+
+/// Restrict memory ordering for atomic store operations.
+#[inline]
+fn enforce_store_ordering(order: Ordering) -> Ordering {
+    match order {
+        Ordering::Relaxed | Ordering::Release => Ordering::Release,
+        Ordering::SeqCst => Ordering::SeqCst,
+        Ordering::Acquire => panic!("there is no such thing as an acquire store"),
+        Ordering::AcqRel => panic!("there is no such thing as an acquire/release store"),
+        _ => panic!("unsupported memory ordering: {:?}", order),
+    }
+}
+
+/// Restrict memory ordering for atomic RMW operations.
+#[inline]
+fn enforce_swap_ordering(order: Ordering) -> Ordering {
+    match order {
+        Ordering::Relaxed | Ordering::Acquire | Ordering::Release | Ordering::AcqRel => {
+            Ordering::AcqRel
+        }
+        Ordering::SeqCst => Ordering::SeqCst,
+        _ => panic!("unsupported memory ordering: {:?}", order),
+    }
+}
+
 impl<'a, T> AtomicRef<'a, T> {
     /// Creates a new `AtomicRef`.
     ///
@@ -161,7 +210,11 @@ impl<'a, T> AtomicRef<'a, T> {
 
     /// Loads the value stored in the `AtomicRef`.
     ///
-    /// `load` takes an `Ordering` argument which describes the memory ordering of this operation.
+    /// `load` takes an `Ordering` argument which describes the memory ordering
+    /// of this operation.
+    ///
+    /// Calls with ordering weaker than `Acquire` will be performed with
+    /// `Acquire` ordering.
     ///
     /// # Panics
     ///
@@ -176,15 +229,19 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static VALUE: i32 = 10;
     ///
     /// let some_ref = AtomicRef::new(Some(&VALUE));
-    /// assert_eq!(some_ref.load(Ordering::Relaxed), Some(&10));
+    /// assert_eq!(some_ref.load(Ordering::Acquire), Some(&10));
     /// ```
     pub fn load(&self, ordering: Ordering) -> Option<&'a T> {
-        unsafe { to_opt(self.data.load(ordering)) }
+        unsafe { to_opt(self.data.load(enforce_load_ordering(ordering))) }
     }
 
     /// Stores a value into the `AtomicRef`.
     ///
-    /// `store` takes an `Ordering` argument which describes the memory ordering of this operation.
+    /// `store` takes an `Ordering` argument which describes the memory ordering
+    /// of this operation.
+    ///
+    /// Calls with ordering weaker than `Release` will be performed with
+    /// `Release` ordering.
     ///
     /// # Panics
     ///
@@ -199,15 +256,20 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static VALUE: i32 = 10;
     ///
     /// let some_ptr = AtomicRef::new(None);
-    /// some_ptr.store(Some(&VALUE), Ordering::Relaxed);
+    /// some_ptr.store(Some(&VALUE), Ordering::SeqCst);
     /// ```
     pub fn store(&self, ptr: Option<&'a T>, order: Ordering) {
-        self.data.store(from_opt(ptr), order)
+        self.data
+            .store(from_opt(ptr), enforce_store_ordering(order))
     }
 
     /// Stores a value into the `AtomicRef`, returning the old value.
     ///
-    /// `swap` takes an `Ordering` argument which describes the memory ordering of this operation.
+    /// `swap` takes an `Ordering` argument which describes the memory ordering
+    /// of this operation.
+    ///
+    /// Calls with ordering weaker than `AcqRel` will be performed with `AcqRel`
+    /// ordering.
     ///
     /// # Examples
     ///
@@ -219,10 +281,10 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static OTHER_VALUE: i32 = 20;
     ///
     /// let some_ptr = AtomicRef::new(Some(&VALUE));
-    /// let value = some_ptr.swap(Some(&OTHER_VALUE), Ordering::Relaxed);
+    /// let value = some_ptr.swap(Some(&OTHER_VALUE), Ordering::SeqCst);
     /// ```
     pub fn swap(&self, p: Option<&'a T>, order: Ordering) -> Option<&'a T> {
-        unsafe { to_opt(self.data.swap(from_opt(p), order)) }
+        unsafe { to_opt(self.data.swap(from_opt(p), enforce_swap_ordering(order))) }
     }
 
     /// Stores a value into the `AtomicRef` if the current value is the "same" as
@@ -238,6 +300,9 @@ impl<'a, T> AtomicRef<'a, T> {
     /// `compare_and_swap` also takes an `Ordering` argument which describes the
     /// memory ordering of this operation.
     ///
+    /// Calls with ordering weaker than `AcqRel` will be performed with `AcqRel`
+    /// ordering.
+    ///
     /// # Examples
     ///
     /// ```
@@ -248,8 +313,9 @@ impl<'a, T> AtomicRef<'a, T> {
     /// static OTHER_VALUE: i32 = 20;
     ///
     /// let some_ptr = AtomicRef::new(Some(&VALUE));
-    /// let value = some_ptr.compare_and_swap(Some(&OTHER_VALUE), None, Ordering::Relaxed);
+    /// let value = some_ptr.compare_and_swap(Some(&OTHER_VALUE), None, Ordering::SeqCst);
     /// ```
+    #[allow(deprecated)]
     pub fn compare_and_swap(
         &self,
         current: Option<&'a T>,
@@ -257,10 +323,11 @@ impl<'a, T> AtomicRef<'a, T> {
         order: Ordering,
     ) -> Option<&'a T> {
         unsafe {
-            to_opt(
-                self.data
-                    .compare_and_swap(from_opt(current), from_opt(new), order),
-            )
+            to_opt(self.data.compare_and_swap(
+                from_opt(current),
+                from_opt(new),
+                enforce_swap_ordering(order),
+            ))
         }
     }
 
@@ -281,6 +348,9 @@ impl<'a, T> AtomicRef<'a, T> {
     /// when the operation fails. The failure ordering can't be `Release` or
     /// `AcqRel` and must be equivalent or weaker than the success ordering.
     ///
+    /// Calls with a success ordering weaker than `AcqRel` or failure ordering
+    /// weaker than `Acquire` will be performed with those orderings.
+    ///
     /// # Examples
     ///
     /// ```
@@ -292,7 +362,7 @@ impl<'a, T> AtomicRef<'a, T> {
     ///
     /// let some_ptr = AtomicRef::new(Some(&VALUE));
     /// let value = some_ptr.compare_exchange(Some(&OTHER_VALUE), None,
-    ///                                       Ordering::SeqCst, Ordering::Relaxed);
+    ///                                       Ordering::SeqCst, Ordering::Acquire);
     /// ```
     pub fn compare_exchange(
         &self,
@@ -302,10 +372,12 @@ impl<'a, T> AtomicRef<'a, T> {
         failure: Ordering,
     ) -> Result<Option<&'a T>, Option<&'a T>> {
         unsafe {
-            match self
-                .data
-                .compare_exchange(from_opt(current), from_opt(new), success, failure)
-            {
+            match self.data.compare_exchange(
+                from_opt(current),
+                from_opt(new),
+                enforce_swap_ordering(success),
+                enforce_load_ordering(failure),
+            ) {
                 Ok(p) => Ok(to_opt(p)),
                 Err(p) => Err(to_opt(p)),
             }
@@ -325,6 +397,9 @@ impl<'a, T> AtomicRef<'a, T> {
     /// failure ordering can't be `Release` or `AcqRel` and must be equivalent or weaker than the
     /// success ordering.
     ///
+    /// Calls with a success ordering weaker than `AcqRel` or failure ordering
+    /// weaker than `Acquire` will be performed with those orderings.
+    ///
     /// # Examples
     ///
     /// ```
@@ -336,10 +411,10 @@ impl<'a, T> AtomicRef<'a, T> {
     ///
     /// let some_ptr = AtomicRef::new(Some(&VALUE));
     ///
-    /// let mut old = some_ptr.load(Ordering::Relaxed);
+    /// let mut old = some_ptr.load(Ordering::Acquire);
     /// loop {
     ///     match some_ptr.compare_exchange_weak(old, Some(&VALUE),
-    ///                                          Ordering::SeqCst, Ordering::Relaxed) {
+    ///                                          Ordering::SeqCst, Ordering::Acquire) {
     ///         Ok(_) => break,
     ///         Err(x) => old = x,
     ///     }
@@ -356,8 +431,8 @@ impl<'a, T> AtomicRef<'a, T> {
             match self.data.compare_exchange_weak(
                 from_opt(current),
                 from_opt(new),
-                success,
-                failure,
+                enforce_swap_ordering(success),
+                enforce_load_ordering(failure),
             ) {
                 Ok(p) => Ok(to_opt(p)),
                 Err(p) => Err(to_opt(p)),
